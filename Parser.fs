@@ -72,14 +72,18 @@ module Parser =
                 lParen >>. (sepBy argument comma) .>> rParen
 
             let returns =
-                (opt (str "->" >>. spaces >>. typeLiteral))
+                (opt typeLiteral)
+
+            let parseExpr =
+                let bloc = (block |>> Block)
+                let other = (skipWs (str "=>")) >>. expression
+                attempt bloc <|> other
 
             (str "func") >>.
                  (skipWs identifierLiteral)
             .>>. (skipWs arguments)
             .>>. (skipWs returns)
-            .>>  (skipWs (str ":"))
-            .>>. (expression)
+            .>>. (parseExpr)
             |>> fun (((a, b), c), d) -> Func(a, b, c, d)
 
         functionToplevel
