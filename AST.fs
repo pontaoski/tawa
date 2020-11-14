@@ -6,7 +6,11 @@ module AST =
     type Kind = int64
 
     type Identifier = string
-    type Type = Identifier
+
+    type Type =
+        | Ident of Identifier
+        | FunctionPointer of arguments: Type list * returns: Type option
+        | Struct of fields: (Identifier * Type) list
 
     type Literal =
         | Integer of int64
@@ -20,6 +24,7 @@ module AST =
 
     type TopLevel =
         | Func of name: Identifier * arguments: (Identifier * Type) list * returns: Type option * expr: Expression
+        | TypeDeclaration of name: Identifier * kind: Type
 
     type ASTNode =
         | T of TopLevel
@@ -132,16 +137,40 @@ module Codegen =
                 LLVM.PositionBuilderAtEnd(b, mergeBloc)
                 phi
 
+    let rec codegenType (modu: LLVMModuleRef) (builder: LLVMBuilderRef) (h: ContextDict) (t: Type) =
+        match t with
+            | Ident n -> h.[n].AssertType
+            | FunctionPointer(a, r) ->
+                let toType (args: Type list, returns: Type option) =
+                    let retType =
+                        match returns with
+                            | Some(v) ->
+                                codegenType modu builder h v
+                            | None -> LLVM.VoidType()
+
+                    let inTypes = (args |> List.map (codegenType modu builder h)) |> List.toArray
+
+                    LLVM.FunctionType(retType, inTypes, false)
+
+                toType(a, r)
+            | Struct fields ->
+                let getType a =
+                    let (_, a') = a
+                    a'
+
+                LLVM.StructType(List.map (getType >> (codegenType modu builder h)) fields |> List.toArray, false)
+
     let rec codegenToplevel (modu: LLVMModuleRef) (builder: LLVMBuilderRef) (t: TopLevel) (h: ContextDict) =
         let toType (args: (Identifier * Type) list, returns: Type option) =
             let retType =
                 match returns with
-                    | Some(v) -> h.[v].AssertType
+                    | Some(v) ->
+                        codegenType modu builder h v
                     | None -> LLVM.VoidType()
 
             let argType (x: Identifier * Type) =
                 let (_, kind) = x
-                h.[kind].AssertType
+                codegenType modu builder h kind
 
             let inTypes = (args |> (List.map argType)) |> List.toArray
 
@@ -170,7 +199,8 @@ module Codegen =
                         let (ident, _) = args.[int i]
                         h.Remove(ident) |> ignore
 
-                fn
+            | TypeDeclaration(name, kind) ->
+                h.Add(name, T(codegenType modu builder h kind))
 
     let codegen (tls: AST.TopLevel list) =
         let builder = LLVM.CreateBuilder()

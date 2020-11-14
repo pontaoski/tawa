@@ -26,7 +26,32 @@ module Parser =
 
         many1Satisfy2L firstChar generalChar "identifier"
 
-    let typeLiteral: Parser<Type,unit> = identifierLiteral
+    // expressions
+    let (typeLiteral: Parser<Type,unit>), typeLiteralImpl = createParserForwardedToRef()
+
+    let parseIdentType = identifierLiteral |>> Ident
+    let parseFuncType: Parser<Type,unit> =
+        let arguments =
+            lParen >>. (sepBy (skipWs typeLiteral) comma) .>> rParen
+
+        let returns =
+            (opt typeLiteral)
+
+        (str "func") >>.
+             skipWs arguments
+        .>>. returns
+        |>> FunctionPointer
+    let parseStructType: Parser<Type,unit> =
+        let eoStructField = (str ",") <|> newlineReturn ","
+
+        let field: Parser<(Identifier*Type),unit> =
+            (identifierLiteral .>> (skipWs (str ":")) .>>. typeLiteral)
+
+        (str "struct") >>. (skipWs lBracket) >>. (many (spaces >>. field .>> eoStructField .>> spaces)) .>> spaces .>> rBracket |>> Struct
+
+
+    do typeLiteralImpl :=
+        parseFuncType <|> parseStructType <|> parseIdentType
 
     // literals
     let literal: Parser<Literal,unit> =
@@ -69,7 +94,7 @@ module Parser =
                 (identifierLiteral .>> (skipWs (str ":")) .>>. typeLiteral)
 
             let arguments =
-                lParen >>. (sepBy argument comma) .>> rParen
+                lParen >>. (sepBy (skipWs argument) comma) .>> rParen
 
             let returns =
                 (opt typeLiteral)
@@ -86,7 +111,11 @@ module Parser =
             .>>. (parseExpr)
             |>> fun (((a, b), c), d) -> Func(a, b, c, d)
 
-        functionToplevel
+        let typeToplevel: Parser<TopLevel,unit> =
+            (str "type") >>. (skipWs identifierLiteral) .>>. typeLiteral
+            |>> TypeDeclaration
+
+        typeToplevel <|> functionToplevel
 
     let program =
         let toplevel = topLevel .>> eos
