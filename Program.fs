@@ -23,4 +23,6 @@ let main argv =
     printf "testcase 7:\n\t%A\n\n\n" (must program "type Yeet func(int, int) int")
     printf "testcase 8:\n\t%A\n\n\n" (must program yate)
 
+    compile [codegen (must program "func main() {}")]
+
     0 // return an integer exit code

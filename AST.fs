@@ -199,6 +199,9 @@ module Codegen =
                         let (ident, _) = args.[int i]
                         h.Remove(ident) |> ignore
 
+                if LLVM.VerifyFunction(fn, LLVMVerifierFailureAction.LLVMPrintMessageAction).Value <> 0 then
+                    LLVM.DeleteFunction(fn)
+
             | TypeDeclaration(name, kind) ->
                 h.Add(name, T(codegenType modu builder h kind))
 
@@ -212,4 +215,42 @@ module Codegen =
 
         (List.map compile tls) |> ignore
 
-        LLVM.DumpModule modu
+        compile (("_start", [], None, (Call("main", []))) |> Func)
+
+        ("main", modu)
+
+    let compile (mods: (string * LLVMModuleRef) list) =
+        let comp (amod: (string * LLVMModuleRef)) =
+            let name, modu = amod
+
+            let fname = sprintf "/tmp/tawa-%s.ll" name
+            let str = ref ""
+            let res = LLVM.PrintModuleToFile(modu, fname, str)
+
+            if res.Value = 0 then
+                printfn "Transpiled module %s successfully" name
+            else
+                printfn "Failed to transpile module %s: %s" name str.contents
+                exit 1
+
+            fname
+
+        let files = (List.map comp) mods
+
+        let args = ["-Wno-override-module"; "-nostdlib"] @ files @ ["-o"; "prog"]
+
+        let proc = new System.Diagnostics.Process()
+        proc.StartInfo.FileName <- "clang"
+        for arg in args do
+            proc.StartInfo.ArgumentList.Add(arg)
+
+        proc.Start() |> ignore
+        proc.WaitForExit()
+
+        if proc.ExitCode = 0 then
+            printfn "Compiled program"
+        else
+            printfn "Failed to compile program"
+            exit 1
+
+        ()
